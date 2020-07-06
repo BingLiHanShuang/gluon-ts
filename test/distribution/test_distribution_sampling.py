@@ -34,10 +34,13 @@ from gluonts.mx.distribution import (
     Dirichlet,
     DirichletMultinomial,
     Categorical,
+    PeakOverThresholdGeneralizedPareto,
 )
 from gluonts.core.serde import dump_json, load_json, dump_code, load_code
 
 from gluonts.testutil import empirical_cdf
+
+from gluonts.mx.distribution.bijection import AffineTransformation
 
 
 test_cases = [
@@ -115,14 +118,35 @@ test_cases = [
         },
     ),
     (Poisson, {"rate": mx.nd.array([1000.0, 0])}),
+    (
+        PeakOverThresholdGeneralizedPareto,
+        {
+            "scale": mx.nd.array([1.2432592, 1.0293254]),
+            "concentration": mx.nd.array([0.07643212, 0.05101381]),
+        },
+    ),
 ]
 
 
 serialize_fn_list = [lambda x: x, lambda x: load_json(dump_json(x))]
 
 
-DISTRIBUTIONS_WITH_CDF = [Gaussian, Uniform, Laplace, Binned]
-DISTRIBUTIONS_WITH_QUANTILE_FUNCTION = [Gaussian, Uniform, Laplace, Binned]
+DISTRIBUTIONS_WITH_CDF = [
+    Gaussian,
+    Uniform,
+    Laplace,
+    Binned,
+    PeakOverThresholdGeneralizedPareto,
+]
+# DISTRIBUTIONS_WITH_QUANTILE_FUNCTION = [Gaussian, Uniform, Laplace, Binned]
+# base_distribution_quantile wait for test
+DISTRIBUTIONS_WITH_QUANTILE_FUNCTION = [
+    Gaussian,
+    Uniform,
+    Laplace,
+    Binned,
+    PeakOverThresholdGeneralizedPareto,
+]
 
 
 @pytest.mark.parametrize("distr_class, params", test_cases)
@@ -157,8 +181,27 @@ def test_sampling(distr_class, params, serialize_fn) -> None:
     if distr_class in DISTRIBUTIONS_WITH_QUANTILE_FUNCTION:
         levels = np.linspace(1.0e-3, 1.0 - 1.0e-3, 100)
         emp_qfunc = np.percentile(np_samples, levels * 100, axis=0)
-        calc_qfunc = distr.quantile(mx.nd.array(levels)).asnumpy()
-        assert np.allclose(calc_qfunc, emp_qfunc, rtol=1e-1)
+        # base_distribution_quantile wait for test
+        if distr_class == PeakOverThresholdGeneralizedPareto:
+            levels = 1.0e-4
+            # print(np_samples)
+            emp_qfunc = np.percentile(np_samples, levels * 100, axis=0)
+            # threshold = [8709.9406813,  8433.3584837]
+            threshold = [0, 0]
+            peak_ratio = 0.00010758546598626404
+            transforms = [
+                AffineTransformation(
+                    loc=None,
+                    scale=mx.nd.array([0.00142039306640625], dtype=np.float32),
+                )
+            ]
+            calc_qfunc = distr.base_distribution_quantile(
+                levels, mx.nd.array(threshold), peak_ratio, transforms
+            ).asnumpy()
+            assert np.allclose(calc_qfunc, emp_qfunc, atol=1e-2, rtol=1e-1)
+        else:
+            calc_qfunc = distr.quantile(mx.nd.array(levels)).asnumpy()
+            assert np.allclose(calc_qfunc, emp_qfunc, rtol=1e-1)
 
 
 test_cases_multivariate = [
